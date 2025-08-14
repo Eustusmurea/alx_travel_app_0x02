@@ -1,5 +1,5 @@
 from django.db import models
-from .enums import Roles, BookingStatus, AMENITIES 
+from .enums import Roles, BookingStatus, AMENITIES , PaymentStatus
 from django.db.models import CheckConstraint, Q, F
 from django.contrib.auth.models import AbstractUser
 import uuid
@@ -39,7 +39,6 @@ class Listing(models.Model):
     location = models.CharField(max_length=100)
     price_per_night = models.DecimalField(max_digits=8, decimal_places=2)
     is_available = models.BooleanField(default=True)
-    watchlist = models.ManyToManyField(Users, blank=True, related_name='likes')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -55,7 +54,6 @@ class PropertyFeature(models.Model):
     amenity_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
     listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='amenity')
     name= models.CharField(max_length=10, null=False, choices=AMENITIES.choices)
-    qty = models.IntegerField(null=False)
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
@@ -114,3 +112,22 @@ class Review(models.Model):
     @property
     def formatted_created_at(self):
         return self.created_at.strftime("%b %d, %Y, %H:%M %p").replace("AM", "a.m.").replace("PM", "p.m.")   
+
+#payment model 
+#to contain payment information for bookings
+#needs (Booking reference fk Booking, transaction_id, amount, status default Pending, created_at: autoadd now)
+
+class Payment(models.Model):
+    payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='payments')
+    transaction_id = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    status = models.CharField(max_length=10, null=False, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'Payment {self.payment_id} for {self.booking.listing.title}'
+
+    @property
+    def formatted_created_at(self):
+        return self.created_at.strftime("%b %d, %Y, %H:%M %p").replace("AM", "a.m.").replace("PM", "p.m.")

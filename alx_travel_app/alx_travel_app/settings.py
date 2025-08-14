@@ -26,7 +26,7 @@ env = environ.Env(
     )
 
 # Take environment variables from .env file
-environ.Env.read_env(os.path.join(BASE_DIR, '..\_msg_app.env'))
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 
 # Quick-start development settings - unsuitable for production
@@ -34,6 +34,9 @@ environ.Env.read_env(os.path.join(BASE_DIR, '..\_msg_app.env'))
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')
+CHAPA_SECRET_KEY = env('CHAPA_SECRET_KEY')
+CHAPA_PUBLIC_KEY = env('CHAPA_PUBLIC_KEY')
+CHAPA_ENCRYPTION_KEY = env('CHAPA_ENCRYPTION_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
@@ -50,7 +53,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework', 
+    'rest_framework',
+    'rest_framework_simplejwt',
     'drf_spectacular',
     'corsheaders',
     'drf_yasg',

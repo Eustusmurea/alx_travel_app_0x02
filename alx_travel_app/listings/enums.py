@@ -16,3 +16,8 @@ class AMENITIES(models.TextChoices):
     PETS = 'PETS', 'Pets Allowed' 
     GYM = "GYM", "Gym" 
     PARKING = 'PARKING', 'Parking'
+
+class PaymentStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    COMPLETED = 'COMPLETED', 'Completed'
+    FAILED = 'FAILED', 'Failed'

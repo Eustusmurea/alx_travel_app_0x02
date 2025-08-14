@@ -6,4 +6,5 @@ router = routers.DefaultRouter()
 router.register(r'listings', ListingViewSet)
 router.register(r'bookings', BookingViewSet)
 
+
 urlpatterns = router.urls

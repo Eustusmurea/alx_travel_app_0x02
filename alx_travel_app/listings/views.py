@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
@@ -9,9 +9,17 @@ from .models import Listing, Booking, Review # Import Review for average rating 
 from .serializers import (
     ListingSerializer,
     BookingSerializer,
-    ReviewSerializer # Potentially useful for nested writes, though not strictly required for these viewsets
+    ReviewSerializer ,
+    UserSerializer
 )
 from .enums import BookingStatus # Import BookingStatus for setting default status
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+class SignupView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
 
 
 class ListingViewSet(viewsets.ModelViewSet):
