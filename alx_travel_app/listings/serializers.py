@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from rest_framework import serializers
-from .models import Users, Listing, PropertyFeature, Booking, Review
+from .models import Users, Listing, PropertyFeature, Booking, Review, Payment
 from .enums import Roles, BookingStatus, AMENITIES
 
 
@@ -49,7 +49,7 @@ class PropertyFeatureSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyFeature
         fields = [
-            'amenity_id', 'listing', 'name', 'qty', 
+            'amenity_id', 'listing', 'name', 
             'created_at', 'formatted_created_at'
         ]
         read_only_fields = ['amenity_id', 'created_at', 'formatted_created_at']
@@ -217,3 +217,20 @@ class BookingSerializer(serializers.ModelSerializer):
             validated_data['status'] = BookingStatus.PENDING # Ensure this is from your enums
 
         return super().create(validated_data)
+
+class PaymentSerializer(serializers.ModelSerializer):
+    booking_id = serializers.UUIDField(source='booking.booking_id', read_only=True)
+    listing_title = serializers.CharField(source='booking.listing.title', read_only=True)
+    formatted_created_at = serializers.ReadOnlyField()
+
+    class Meta:
+        model = Payment
+        fields = [
+            'payment_id',
+            'booking_id',
+            'listing_title',
+            'transaction_id',
+            'amount',
+            'status',
+            'formatted_created_at'
+        ]

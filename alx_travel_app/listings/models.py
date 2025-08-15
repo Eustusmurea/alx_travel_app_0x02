@@ -16,6 +16,7 @@ class Users(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
 
     REQUIRED_FIELDS = ['email', 'first_name', 'last_name']
+    USER_ID_FIELD = 'user_id'
 
     def __str__(self):
         return self.email
@@ -41,6 +42,11 @@ class Listing(models.Model):
     is_available = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    watchlist = models.ManyToManyField(
+        Users,
+        related_name='watchlisted_listings',
+        blank=True
+    )
 
     def __str__(self):
         return f"{self.title} listed by: {self.host_id.full_name}"
