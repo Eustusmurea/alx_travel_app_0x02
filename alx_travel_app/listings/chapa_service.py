@@ -35,7 +35,7 @@ def initialize_payment(amount, email, tx_ref=None, currency="KES", first_name=""
         "tx_ref": tx_ref,
         "first_name": first_name,
         "last_name": last_name,
-        "return_url": callback_url
+        "callback_url": callback_url
     }
 
     try:

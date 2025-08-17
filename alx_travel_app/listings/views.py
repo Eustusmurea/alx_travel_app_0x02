@@ -13,6 +13,8 @@ from rest_framework import status
 from rest_framework.views import APIView
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 
 
@@ -219,7 +221,7 @@ class InitializePaymentView(APIView):
             tx_ref=tx_ref,
             first_name=request.user.first_name,
             last_name=request.user.last_name,
-            currency="KES"  # Adjust as needed
+            currency="ETB"  # Adjust as needed
         )
 
         if response.get("status") == "success":
@@ -272,23 +274,32 @@ class VerifyPaymentView(APIView):
             "message": "Payment verified successfully"
         }, status=status.HTTP_200_OK)
     
-class ChapaWebhookView(APIView):
-    permission_classes = [AllowAny]  # Secure with a secret key
+@method_decorator(csrf_exempt, name='dispatch')
+class PaymentWebhookView(APIView):
+    authentication_classes = []  # Webhooks should not require auth
+    permission_classes = []      # Let Chapa post freely
 
-    def post(self, request):
-        tx_ref = request.data.get('tx_ref')
-        status = request.data.get('status')
-        payment = Payment.objects.filter(transaction_id=tx_ref).first()
-        if not payment:
-            logger.error(f"Webhook: Payment not found for tx_ref={tx_ref}")
-            return Response(status=status.HTTP_404_NOT_FOUND)
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        tx_ref = data.get("tx_ref")
+        payment_status = data.get("status")
 
+        if not tx_ref:
+            return Response({"error": "tx_ref missing"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payment = Payment.objects.get(transaction_id=tx_ref)
+        except Payment.DoesNotExist:
+            return Response({"error": f"Payment not found for tx_ref={tx_ref}"}, status=status.HTTP_404_NOT_FOUND)
+
+        # ✅ update payment atomically
         with transaction.atomic():
-            payment.payment_status = PaymentStatus.SUCCESS if status == "success" else PaymentStatus.FAILED
+            if payment_status == "success":
+                payment.payment_status = PaymentStatus.SUCCESSFUL
+            elif payment_status == "failed":
+                payment.payment_status = PaymentStatus.FAILED
+            else:
+                payment.payment_status = PaymentStatus.PENDING
             payment.save()
-            if payment.payment_status == PaymentStatus.SUCCESS:
-                payment.booking.status = BookingStatus.CONFIRMED
-                payment.booking.save()
 
-        logger.info(f"Webhook: Payment {tx_ref} updated to {payment.payment_status}")
-        return Response(status=status.HTTP_200_OK)
+        return Response({"message": "Webhook processed successfully"}, status=status.HTTP_200_OK)

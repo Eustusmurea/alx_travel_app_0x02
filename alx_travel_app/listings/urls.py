@@ -6,7 +6,7 @@ from .views import (
     BookingViewSet,
     InitializePaymentView,
     VerifyPaymentView,
-    ChapaWebhookView,
+    PaymentWebhookView ,
 )
 
 # Create a router for ViewSet routes
@@ -22,7 +22,7 @@ urlpatterns = [
     # Payment endpoints
     path('payments/init/', InitializePaymentView.as_view(), name='initialize-payment'),
     path('payments/verify/', VerifyPaymentView.as_view(), name='verify-payment'),
-    path('payments/webhook/', ChapaWebhookView.as_view(), name='chapa-webhook'),
+    path('payments/webhook/', PaymentWebhookView.as_view(), name='payment-webhook'),
   # Optional
 
     # Include ViewSet routes (listings/, bookings/, and custom actions)
