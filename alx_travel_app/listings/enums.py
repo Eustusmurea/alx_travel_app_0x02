@@ -8,8 +8,9 @@ class Roles(models.TextChoices):
 class BookingStatus(models.TextChoices):
     PENDING = 'PENDING', 'Pending'
     CONFIRMED = 'CONFIRMED', 'Confirmed'
-    CANCELED = 'CANCELED', 'Canceled'    
-    
+    CANCELED = 'CANCELED', 'Canceled'  # Matches provided spelling
+    DECLINED = 'DECLINED', 'Declined'  #
+    COMPLETED = 'COMPLETED', 'Completed'
 class AMENITIES(models.TextChoices):
     WI_FI = 'WI-FI', 'wi-fi'
     POOL = 'POOL', 'Swimming Pool'

@@ -1,5 +1,5 @@
 from django.db import models
-from .enums import Roles, BookingStatus, AMENITIES , PaymentStatus
+from .enums import Roles, BookingStatus, AMENITIES, PaymentStatus
 from django.db.models import CheckConstraint, Q, F
 from django.contrib.auth.models import AbstractUser
 import uuid
@@ -11,7 +11,6 @@ class Users(AbstractUser):
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)  
     email = models.EmailField(unique=True, null=False)
-    password = models.CharField(max_length=128, null=False)  
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -34,7 +33,7 @@ class Users(AbstractUser):
 
 class Listing(models.Model):
     listing_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
-    host = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='listing_host')
+    host = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='listings')
     title = models.CharField(max_length=100)
     description = models.TextField()
     location = models.CharField(max_length=100)
@@ -49,7 +48,7 @@ class Listing(models.Model):
     )
 
     def __str__(self):
-        return f"{self.title} listed by: {self.host_id.full_name}"
+        return f"{self.title} listed by: {self.host.full_name}"
 
     @property
     def formatted_created_at(self):
@@ -58,12 +57,12 @@ class Listing(models.Model):
 
 class PropertyFeature(models.Model):
     amenity_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
-    listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='amenity')
-    name= models.CharField(max_length=10, null=False, choices=AMENITIES.choices)
+    listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='amenities')
+    name = models.CharField(max_length=20, null=False, choices=AMENITIES.choices)
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.listing.title})"
     
     @property
     def formatted_created_at(self):
@@ -73,23 +72,30 @@ class PropertyFeature(models.Model):
 class Booking(models.Model):
     booking_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
     listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='bookings')
-    guest = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='customer')
+    guest = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='bookings')
     start_date = models.DateField()
     end_date = models.DateField()
-    total_price = models.DecimalField(max_digits=15, decimal_places=2,  null=True)
+    total_price = models.DecimalField(max_digits=15, decimal_places=2, null=True)
     status = models.CharField(max_length=10, null=False, choices=BookingStatus.choices, default=BookingStatus.PENDING) 
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         constraints = [
             CheckConstraint(
-                check = Q(end_date__gt=F('start_date')), 
-                name = 'check_start_date',
+                check=Q(end_date__gt=F('start_date')),
+                name='check_start_date',
             ),
+            models.UniqueConstraint(
+                fields=['listing', 'start_date', 'end_date'],
+                name='unique_booking_per_date'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['listing', 'start_date', 'end_date']),
         ]
 
     def __str__(self):
-        return f'{self.guest.full_name} booked for {self.listing.title}'
+        return f'{self.guest.full_name} booked {self.listing.title}'
     
     @property
     def formatted_created_at(self):
@@ -99,18 +105,22 @@ class Booking(models.Model):
 class Review(models.Model):
     review_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
     listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name='reviews')
-    reviewer = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='customer_review')
+    reviewer = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='reviews')
     rating = models.IntegerField()
     comment = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
-            constraints = [
-                CheckConstraint(
-                    check=Q(rating__gte=1) & Q(rating__lte=5),
-                    name='rating_range_check',
-                ),
-            ]
+        constraints = [
+            CheckConstraint(
+                check=Q(rating__gte=1) & Q(rating__lte=5),
+                name='rating_range_check',
+            ),
+            models.UniqueConstraint(
+                fields=['listing', 'reviewer'],
+                name='unique_review_per_user'
+            ),
+        ]
     
     def __str__(self):
         return f'{self.reviewer.full_name}, rating: {self.rating} out of 5'
@@ -119,20 +129,18 @@ class Review(models.Model):
     def formatted_created_at(self):
         return self.created_at.strftime("%b %d, %Y, %H:%M %p").replace("AM", "a.m.").replace("PM", "p.m.")   
 
-#payment model 
-#to contain payment information for bookings
-#needs (Booking reference fk Booking, transaction_id, amount, status default Pending, created_at: autoadd now)
 
 class Payment(models.Model):
     payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, null=False)
-    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='payments')
-    transaction_id = models.CharField(max_length=100, unique=True)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
-    status = models.CharField(max_length=10, null=False, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
+    user = models.ForeignKey(Users, on_delete=models.CASCADE, related_name="payments")
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payments")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    transaction_id = models.CharField(max_length=100, blank=True, null=True)
+    payment_status = models.CharField(max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f'Payment {self.payment_id} for {self.booking.listing.title}'
+        return f"Payment {self.transaction_id or 'N/A'} for Booking {self.booking.booking_id} - {self.payment_status}"
 
     @property
     def formatted_created_at(self):

@@ -4,6 +4,9 @@ from decimal import Decimal
 from rest_framework import serializers
 from .models import Users, Listing, PropertyFeature, Booking, Review, Payment
 from .enums import Roles, BookingStatus, AMENITIES
+from .chapa_service import initialize_payment, verify_payment
+import uuid
+from django.conf import settings
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -104,7 +107,6 @@ class ListingSerializer(serializers.ModelSerializer):
     amenity = PropertyFeatureSerializer(many=True, read_only=True) 
     reviews = ReviewSerializer(many=True, read_only=True)
     watchlist = UserSerializer(many=True, read_only=True)
-
     formatted_created_at = serializers.ReadOnlyField() 
     features = serializers.SerializerMethodField()
     interested_clients = serializers.SerializerMethodField()
@@ -115,7 +117,7 @@ class ListingSerializer(serializers.ModelSerializer):
         fields = [
             'listing_id', 'host', 'title', 'description', 'location',
             'price_per_night', 'is_available', 'watchlist', 'created_at',
-            'updated_at', 'amenity', 'reviews', 'bookings', # Fixed comma here
+            'updated_at', 'amenity', 'reviews',
             'formatted_created_at', 'features', 'interested_clients', 'average_rating'
         ]
         read_only_fields = [
@@ -219,18 +221,13 @@ class BookingSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 class PaymentSerializer(serializers.ModelSerializer):
-    booking_id = serializers.UUIDField(source='booking.booking_id', read_only=True)
-    listing_title = serializers.CharField(source='booking.listing.title', read_only=True)
-    formatted_created_at = serializers.ReadOnlyField()
-
     class Meta:
         model = Payment
-        fields = [
-            'payment_id',
-            'booking_id',
-            'listing_title',
-            'transaction_id',
-            'amount',
-            'status',
-            'formatted_created_at'
-        ]
+        fields = "__all__"
+
+class PaymentInitSerializer(serializers.Serializer):
+    booking_id = serializers.UUIDField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+class PaymentVerifySerializer(serializers.Serializer):
+    tx_ref = serializers.CharField()

@@ -1,18 +1,32 @@
+from asyncio.log import logger
+import logging
+from time import time
+import uuid
 from django.shortcuts import render
+import requests
+from .chapa_service import initialize_payment, verify_payment
 from rest_framework import viewsets, permissions, generics
+from rest_framework.permissions import AllowAny
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Avg
+from rest_framework.views import APIView
+from django.db import transaction
+from django.shortcuts import get_object_or_404
 
-from .models import Listing, Booking, Review # Import Review for average rating calculation
+
+
+from .models import Listing, Booking, Payment, Review # Import Review for average rating calculation
 from .serializers import (
     ListingSerializer,
     BookingSerializer,
-    ReviewSerializer ,
-    UserSerializer
+    PaymentSerializer,
+    ReviewSerializer,
+    UserSerializer,
+    PaymentInitSerializer,
+    PaymentVerifySerializer
 )
-from .enums import BookingStatus # Import BookingStatus for setting default status
+from .enums import BookingStatus, PaymentStatus 
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -20,6 +34,7 @@ User = get_user_model()
 class SignupView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    permission_classes = [AllowAny] 
 
 
 class ListingViewSet(viewsets.ModelViewSet):
@@ -77,18 +92,10 @@ class ListingViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def book(self, request, pk=None):
-        """
-        Allows an authenticated user to book a specific listing.
-        """
         listing = self.get_object()
-        # You can get start_date and end_date from request.data
-        data = request.data.copy()
-        data['listing'] = listing.pk # Ensure listing ID is set
-        data['guest'] = request.user.pk # Ensure guest ID is set to the current user
-
-        serializer = BookingSerializer(data=data)
+        serializer = BookingSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save(listing=listing, guest=request.user, status=BookingStatus.PENDING)
+            serializer.save(listing=listing, guest=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -190,3 +197,98 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.save()
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
+
+class InitializePaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = PaymentInitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        booking_id = serializer.validated_data['booking_id']
+        amount = serializer.validated_data['amount']
+
+        booking = get_object_or_404(Booking, booking_id=booking_id)
+        if booking.guest != request.user:
+            return Response({"error": "You are not authorized to pay for this booking"}, status=status.HTTP_403_FORBIDDEN)
+
+        tx_ref = str(uuid.uuid4())
+        response = initialize_payment(
+            amount=amount,
+            email=request.user.email,
+            tx_ref=tx_ref,
+            first_name=request.user.first_name,
+            last_name=request.user.last_name,
+            currency="KES"  # Adjust as needed
+        )
+
+        if response.get("status") == "success":
+           with transaction.atomic(): 
+            payment = Payment.objects.create(
+                user=request.user,
+                booking=booking,
+                amount=amount,
+                transaction_id=tx_ref,
+                payment_status=PaymentStatus.PENDING  # Use enum
+            )
+            return Response({
+                "checkout_url": response["data"]["checkout_url"],
+                "payment": PaymentSerializer(payment).data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response({"error": response.get("message", "Payment initialization failed")}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VerifyPaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = PaymentVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        tx_ref = serializer.validated_data['tx_ref']
+        payment = Payment.objects.filter(transaction_id=tx_ref).first()
+        if not payment:
+            return Response({"error": "Payment not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if payment.user != request.user and payment.booking.listing.host != request.user:
+            return Response({"error": "You are not authorized to verify this payment"}, status=status.HTTP_403_FORBIDDEN)
+
+        response = verify_payment(tx_ref)
+        if response.get("status") != "success":
+            payment.payment_status = PaymentStatus.FAILED
+            payment.save()
+            return Response({"error": response.get("message", "Payment verification failed")}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            payment.payment_status = PaymentStatus.SUCCESS if response["data"].get("status") == "success" else PaymentStatus.FAILED
+            payment.save()
+            if payment.payment_status == PaymentStatus.SUCCESS:
+                payment.booking.status = BookingStatus.CONFIRMED
+                payment.booking.save()
+
+        return Response({
+            "payment": PaymentSerializer(payment).data,
+            "message": "Payment verified successfully"
+        }, status=status.HTTP_200_OK)
+    
+class ChapaWebhookView(APIView):
+    permission_classes = [AllowAny]  # Secure with a secret key
+
+    def post(self, request):
+        tx_ref = request.data.get('tx_ref')
+        status = request.data.get('status')
+        payment = Payment.objects.filter(transaction_id=tx_ref).first()
+        if not payment:
+            logger.error(f"Webhook: Payment not found for tx_ref={tx_ref}")
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            payment.payment_status = PaymentStatus.SUCCESS if status == "success" else PaymentStatus.FAILED
+            payment.save()
+            if payment.payment_status == PaymentStatus.SUCCESS:
+                payment.booking.status = BookingStatus.CONFIRMED
+                payment.booking.save()
+
+        logger.info(f"Webhook: Payment {tx_ref} updated to {payment.payment_status}")
+        return Response(status=status.HTTP_200_OK)
