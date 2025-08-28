@@ -1,30 +1,29 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import (
-    SignupView,
-    ListingViewSet,
-    BookingViewSet,
-    InitializePaymentView,
-    VerifyPaymentView,
-    PaymentWebhookView ,
-)
+from . import views
+from django.views.decorators.csrf import csrf_exempt
 
-# Create a router for ViewSet routes
+# DRF router for listings and bookings
 router = DefaultRouter()
-router.register(r'listings', ListingViewSet, basename='listing')
-router.register(r'bookings', BookingViewSet, basename='booking')
+router.register(r'listings', views.ListingViewSet, basename='listing')
+router.register(r'bookings', views.BookingViewSet, basename='booking')
 
-# Define explicit URL patterns
+# Payment URLs
+payment_urls = [
+    path('initialize/', views.InitializePaymentView.as_view(), name='initialize_payment'),
+    path('verify/', views.VerifyPaymentView.as_view(), name='verify_payment'),
+    path('webhook/', csrf_exempt(views.PaymentWebhookView.as_view()), name='payment_webhook'),
+    path('return/', views.PaymentReturnView.as_view(), name='payment_return'),
+]
+
+# Auth URLs
+auth_urls = [
+    path('signup/', views.SignupView.as_view(), name='signup'),
+]
+
+# Main URL patterns
 urlpatterns = [
-    # User signup
-    path('signup/', SignupView.as_view(), name='signup'),
-
-    # Payment endpoints
-    path('payments/init/', InitializePaymentView.as_view(), name='initialize-payment'),
-    path('payments/verify/', VerifyPaymentView.as_view(), name='verify-payment'),
-    path('payments/webhook/', PaymentWebhookView.as_view(), name='payment-webhook'),
-  # Optional
-
-    # Include ViewSet routes (listings/, bookings/, and custom actions)
-    path('', include(router.urls)),
+    path('', include(router.urls)),  # listings/bookings
+    path('payments/', include((payment_urls, 'payments'))),
+    path('auth/', include((auth_urls, 'auth'))),
 ]

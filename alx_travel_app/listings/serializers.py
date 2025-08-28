@@ -11,20 +11,23 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for the custom Users model."""
     full_name = serializers.ReadOnlyField()
     formatted_created_at = serializers.ReadOnlyField()
+    password = serializers.CharField(write_only=True, required=True)
 
     class Meta:
         model = Users
         fields = [
             'user_id', 'username', 'email', 'first_name', 'last_name',
-            'phone_number', 'role', 'created_at', 'full_name', 'formatted_created_at'
+            'phone_number', 'role', 'created_at', 'full_name', 'formatted_created_at',
+            'password',
         ]
         read_only_fields = ['user_id', 'created_at', 'full_name', 'formatted_created_at']
-        extra_kwargs = {
-            'password': {'write_only': True}
-        }
 
     def create(self, validated_data):
-        return Users.objects.create_user(**validated_data)
+        password = validated_data.pop("password")
+        user = Users.objects.create_user(**validated_data)
+        user.set_password(password)  # hash properly
+        user.save()
+        return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
@@ -33,7 +36,6 @@ class UserSerializer(serializers.ModelSerializer):
             instance.set_password(password)
             instance.save()
         return instance
-
 
 class PropertyFeatureSerializer(serializers.ModelSerializer):
     """Serializer for PropertyFeature model (amenities)."""

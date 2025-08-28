@@ -22,3 +22,4 @@ class PaymentStatus(models.TextChoices):
     PENDING = 'PENDING', 'Pending'
     COMPLETED = 'COMPLETED', 'Completed'
     FAILED = 'FAILED', 'Failed'
+    SUCCESSFUL = 'SUCCESSFUL', 'Successful'

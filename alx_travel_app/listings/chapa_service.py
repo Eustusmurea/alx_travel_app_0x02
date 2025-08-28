@@ -1,3 +1,4 @@
+# chapa_service.py
 import os
 import uuid
 import logging
@@ -17,25 +18,27 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-
-def initialize_payment(amount, email, tx_ref=None, currency="KES", first_name="", last_name="", callback_url=None):
+def initialize_payment(amount, email, tx_ref=None, currency="ETB", first_name="", last_name="", callback_url=None):
     """
     Initialize a Chapa payment
     """
     if not tx_ref:
-        tx_ref = str(uuid.uuid4())  # generate unique tx_ref if not provided
+        tx_ref = str(uuid.uuid4())  # Generate unique tx_ref if not provided
 
+    # Use ngrok URL for callback_url and return_url
     if callback_url is None:
-        callback_url = getattr(settings, "BASE_URL", "http://localhost:8000") + "/api/payments/verify/"
+        callback_url = getattr(settings, "NGROK_URL", "https://5af3e1a557cc.ngrok-free.app") + "/api/payments/webhook/"
+    return_url = getattr(settings, "NGROK_URL", "https://5af3e1a557cc.ngrok-free.app") + "/api/payments/return/"
 
     payload = {
-        "amount": str(amount),  # must be string
+        "amount": str(amount),  # Must be string
         "currency": currency,
         "email": email,
         "tx_ref": tx_ref,
         "first_name": first_name,
         "last_name": last_name,
-        "callback_url": callback_url
+        "callback_url": callback_url,
+        "return_url": return_url
     }
 
     try:
@@ -46,14 +49,15 @@ def initialize_payment(amount, email, tx_ref=None, currency="KES", first_name=""
             timeout=15
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        data["data"]["tx_ref"] = tx_ref  # Include tx_ref for local tracking
+        return data
     except requests.Timeout:
         logger.error("Chapa initialize_payment request timed out")
         return {"status": "error", "message": "Request timed out"}
     except requests.RequestException as e:
         logger.error(f"Chapa initialize_payment error: {e}")
         return {"status": "error", "message": str(e)}
-
 
 def verify_payment(tx_ref):
     """

@@ -42,7 +42,11 @@ CHAPA_ENCRYPTION_KEY = env('CHAPA_ENCRYPTION_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
 
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '0be747899e42.ngrok-free.app',  # Add your ngrok URL
+]
 
 
 # Application definition
@@ -159,3 +163,20 @@ AUTH_USER_MODEL = 'listings.Users'
 
 # CORS
 # CORS_ALLOW_ALL_ORIGINS = True
+
+CELERY_BROKER_URL = 'amqp://localhost'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Africa/Nairobi'
+
+# Email Backend Configuration (e.g., using Gmail SMTP)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'mwirigieustus7@gmail.com'
+EMAIL_HOST_PASSWORD = 'ijcx vbas mqxi hivt'
+
+NGROK_URL = 'https://0be747899e42.ngrok-free.app'

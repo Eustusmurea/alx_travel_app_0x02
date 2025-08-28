@@ -1,4 +1,7 @@
 from asyncio.log import logger
+import hmac
+import hashlib
+import json
 import logging
 from time import time
 import uuid
@@ -15,6 +18,9 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.http import HttpResponse
+from .tasks import send_payment_success_email
+from .tasks import send_booking_confirmation_email
 
 
 
@@ -30,6 +36,7 @@ from .serializers import (
 )
 from .enums import BookingStatus, PaymentStatus 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 User = get_user_model()
 
@@ -133,6 +140,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         # The serializer handles `guest` from validated_data already if passed.
         # Ensure it's explicitly set to the requesting user for security.
         serializer.save(guest=self.request.user, status=BookingStatus.PENDING)
+        
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def approve(self, request, pk=None):
@@ -153,6 +161,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         
         booking.status = BookingStatus.CONFIRMED
         booking.save()
+                # Trigger the Celery task asynchronously
+        send_booking_confirmation_email.delay(booking.id, booking.guest.email)
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
 
@@ -263,9 +273,9 @@ class VerifyPaymentView(APIView):
             return Response({"error": response.get("message", "Payment verification failed")}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            payment.payment_status = PaymentStatus.SUCCESS if response["data"].get("status") == "success" else PaymentStatus.FAILED
+            payment.payment_status = PaymentStatus.SUCCESSFUL if response["data"].get("status") == "success" else PaymentStatus.FAILED
             payment.save()
-            if payment.payment_status == PaymentStatus.SUCCESS:
+            if payment.payment_status == PaymentStatus.SUCCESSFUL:
                 payment.booking.status = BookingStatus.CONFIRMED
                 payment.booking.save()
 
@@ -274,32 +284,96 @@ class VerifyPaymentView(APIView):
             "message": "Payment verified successfully"
         }, status=status.HTTP_200_OK)
     
+class PaymentReturnView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        tx_ref = request.GET.get("tx_ref")
+        status = request.GET.get("status")
+        if not tx_ref:
+            logger.error("Missing tx_ref in return URL")
+            return HttpResponse("Invalid request: Missing tx_ref.", status=400)
+
+        try:
+            payment = Payment.objects.get(transaction_id=tx_ref)
+        except Payment.DoesNotExist:
+            logger.error(f"Payment not found for tx_ref={tx_ref}")
+            return HttpResponse("Payment not found.", status=404)
+
+        if payment.user != request.user and payment.booking.listing.host != request.user:
+            logger.error(f"Unauthorized access for tx_ref={tx_ref}")
+            return HttpResponse("Unauthorized.", status=403)
+
+        verification = verify_payment(tx_ref)
+        if verification.get("status") == "success" and verification["data"].get("status") == "success":
+            with transaction.atomic():
+                payment.payment_status = PaymentStatus.SUCCESSFUL
+                payment.booking.status = BookingStatus.CONFIRMED
+                payment.save()
+                payment.booking.save()
+                send_payment_success_email.delay(
+                    payment.user.email,
+                    str(payment.booking.booking_id),
+                    str(payment.amount)
+                )
+            return HttpResponse(f"Payment successful! Transaction reference: {tx_ref}")
+        else:
+            payment.payment_status = PaymentStatus.FAILED
+            payment.save()
+            return HttpResponse("Payment failed or verification error: " + verification.get("message", "Unknown error"), status=400)
+    
 @method_decorator(csrf_exempt, name='dispatch')
 class PaymentWebhookView(APIView):
     authentication_classes = []  # Webhooks should not require auth
     permission_classes = []      # Let Chapa post freely
 
     def post(self, request, *args, **kwargs):
+        # Verify Chapa webhook signature
+        chapa_signature = request.headers.get("Chapa-Signature")
+        if not chapa_signature:
+            logger.error("Missing Chapa-Signature header")
+            return Response({"error": "Invalid signature"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        computed_signature = hmac.new(
+            settings.CHAPA_SECRET_KEY.encode(),
+            request.body,
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(chapa_signature, computed_signature):
+            logger.error("Invalid webhook signature")
+            return Response({"error": "Invalid signature"}, status=status.HTTP_401_UNAUTHORIZED)
+
         data = request.data
         tx_ref = data.get("tx_ref")
         payment_status = data.get("status")
 
         if not tx_ref:
+            logger.error("tx_ref missing in webhook payload")
             return Response({"error": "tx_ref missing"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             payment = Payment.objects.get(transaction_id=tx_ref)
         except Payment.DoesNotExist:
+            logger.error(f"Payment not found for tx_ref={tx_ref}")
             return Response({"error": f"Payment not found for tx_ref={tx_ref}"}, status=status.HTTP_404_NOT_FOUND)
 
-        # ✅ update payment atomically
+        # Atomically update payment and booking
         with transaction.atomic():
             if payment_status == "success":
                 payment.payment_status = PaymentStatus.SUCCESSFUL
+                payment.booking.status = BookingStatus.CONFIRMED
             elif payment_status == "failed":
                 payment.payment_status = PaymentStatus.FAILED
             else:
                 payment.payment_status = PaymentStatus.PENDING
-            payment.save()
 
+            payment.save()
+            payment.booking.save()
+
+        logger.info(f"Webhook processed for tx_ref: {tx_ref}, status: {payment_status}")
         return Response({"message": "Webhook processed successfully"}, status=status.HTTP_200_OK)
+
+    def get(self, request, *args, **kwargs):
+        # Optional: handle GET for manual testing
+        return Response({"message": "Webhook endpoint: POST only"}, status=status.HTTP_200_OK)
